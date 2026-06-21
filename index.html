@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>starforge — WebGPU N-body gravity sandbox</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; overflow: hidden;
+      background: #05050a; color: #dfe6ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    #gpu-canvas, #overlay-canvas {
+      position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
+    }
+    #gpu-canvas { z-index: 0; }
+    #overlay-canvas { z-index: 1; cursor: crosshair; }
+
+    #hud {
+      position: fixed; z-index: 2; top: 12px; left: 12px;
+      display: flex; gap: 12px; align-items: center;
+      padding: 8px 12px; border: 1px solid rgba(140,200,255,0.25);
+      border-radius: 8px; background: rgba(10,12,24,0.6);
+      backdrop-filter: blur(6px); font-size: 13px;
+      user-select: none;
+    }
+    #hud button {
+      font: inherit; color: #dfe6ff; cursor: pointer;
+      background: rgba(140,200,255,0.12);
+      border: 1px solid rgba(140,200,255,0.35);
+      border-radius: 6px; padding: 4px 10px;
+    }
+    #hud button:hover { background: rgba(140,200,255,0.22); }
+    #hud .stat { opacity: 0.85; }
+    #hud .stat b { color: #8cc8ff; font-weight: 600; }
+    #hint {
+      position: fixed; z-index: 2; bottom: 12px; left: 12px;
+      font-size: 12px; opacity: 0.55; line-height: 1.6;
+      pointer-events: none;
+    }
+    #fallback {
+      position: fixed; inset: 0; z-index: 10; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 24px;
+      background: #05050a; color: #ff9d9d; font-size: 18px; line-height: 1.6;
+    }
+
+    /* HUD + hint are hidden while in the gallery, shown during immersion. */
+    body.gallery-open #hud,
+    body.gallery-open #hint { display: none; }
+
+    /* ---- Gallery (展示室) ---- */
+    #gallery {
+      position: fixed; inset: 0; z-index: 5;
+      display: flex; flex-direction: column;
+      padding: 6vh 6vw; overflow-y: auto;
+      background:
+        radial-gradient(1200px 800px at 70% -10%, rgba(60,40,120,0.25), transparent 60%),
+        radial-gradient(900px 700px at 10% 110%, rgba(20,60,120,0.22), transparent 60%),
+        #05050a;
+      transition: opacity 420ms ease;
+    }
+    #gallery.hidden { opacity: 0; pointer-events: none; }
+
+    .gallery-header h1 {
+      margin: 0; font-size: clamp(28px, 6vw, 56px); letter-spacing: 0.18em;
+      font-weight: 600; color: #eaf0ff;
+      text-shadow: 0 0 24px rgba(120,150,255,0.45);
+    }
+    .gallery-header .tagline {
+      margin: 6px 0 0; opacity: 0.6; font-size: 13px; letter-spacing: 0.08em;
+    }
+
+    .gallery-grid {
+      flex: 1; margin: 5vh 0 3vh;
+      display: grid; gap: 22px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      align-content: start;
+    }
+
+    .tile {
+      position: relative; text-align: left; cursor: pointer;
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 22px 22px 24px; min-height: 190px;
+      font: inherit; color: #dfe6ff;
+      background: rgba(10, 12, 24, 0.55);
+      border: 1px solid rgba(var(--glow), 0.25);
+      border-radius: 14px;
+      box-shadow: 0 0 0 rgba(var(--glow), 0);
+      backdrop-filter: blur(4px);
+      transition: transform 240ms ease, box-shadow 320ms ease, border-color 320ms ease;
+      overflow: hidden;
+    }
+    .tile::before {
+      /* soft inner glow toward the orb */
+      content: ""; position: absolute; inset: 0;
+      background: radial-gradient(120px 120px at 24px 32px, rgba(var(--glow), 0.20), transparent 70%);
+      opacity: 0.8; pointer-events: none;
+    }
+    .tile:hover, .tile:focus-visible {
+      transform: translateY(-4px);
+      border-color: rgba(var(--glow), 0.7);
+      box-shadow: 0 12px 40px rgba(var(--glow), 0.28), 0 0 30px rgba(var(--glow), 0.18);
+      outline: none;
+    }
+    .tile-orb {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #fff, rgba(var(--glow), 0.95) 45%, rgba(var(--glow), 0.1) 75%);
+      box-shadow: 0 0 24px rgba(var(--glow), 0.9), 0 0 50px rgba(var(--glow), 0.4);
+      margin-bottom: 8px;
+    }
+    .tile-name { font-size: 18px; font-weight: 600; letter-spacing: 0.04em; }
+    .tile-name-ja { font-size: 12px; opacity: 0.6; letter-spacing: 0.12em; }
+    .tile-desc { font-size: 12.5px; opacity: 0.7; line-height: 1.55; margin-top: 4px; }
+
+    .gallery-foot {
+      font-size: 11.5px; opacity: 0.45; letter-spacing: 0.04em;
+      border-top: 1px solid rgba(140,200,255,0.12); padding-top: 14px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gpu-canvas"></canvas>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div id="hud">
+    <strong>starforge</strong>
+    <button id="btn-pause">Pause</button>
+    <button id="btn-reset">Reset</button>
+    <span class="stat">bodies <b id="stat-count">0</b></span>
+    <span class="stat">fps <b id="stat-fps">–</b></span>
+  </div>
+
+  <div id="hint">
+    drag = add a star (drag direction & length sets velocity) ·
+    wheel = zoom to cursor · right-drag / shift-drag = pan ·
+    space = pause · R = reset
+  </div>
+
+  <div id="fallback">Loading…</div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
