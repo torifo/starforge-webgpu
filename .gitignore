@@ -1,0 +1,6 @@
+# OS / tooling
+.DS_Store
+.superpowers/
+
+# Node (none required, but ignore if a bundler is ever added)
+node_modules/
