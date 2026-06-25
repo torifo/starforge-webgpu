@@ -19,6 +19,7 @@ const btnReset = document.getElementById("btn-reset");
 const btnSlower = document.getElementById("btn-slower");
 const btnFaster = document.getElementById("btn-faster");
 const btnStep = document.getElementById("btn-step");
+const btnRewind = document.getElementById("btn-rewind");
 const elRate = document.getElementById("stat-rate");
 const elEpoch = document.getElementById("stat-epoch");
 
@@ -162,6 +163,16 @@ async function main() {
   btnSlower?.addEventListener("click", () => { time.slower(); refreshTimeHud(); });
   btnFaster?.addEventListener("click", () => { time.faster(); refreshTimeHud(); });
   btnStep?.addEventListener("click", () => { if (active) stepOnce = true; });
+  btnRewind?.addEventListener("click", rewind);
+
+  // Restore the most recent checkpoint and rewind the epoch clock to match.
+  function rewind() {
+    if (!active) return;
+    const t = sim.restoreLast();
+    if (t === null) return;
+    time.simTime = t;
+    renderer.clearTrails();
+  }
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -185,6 +196,8 @@ async function main() {
       refreshTimeHud();
     } else if (e.key === "n" || e.key === "N") {
       stepOnce = true;
+    } else if (e.key === "z" || e.key === "Z") {
+      rewind();
     }
   });
 
@@ -262,6 +275,8 @@ async function main() {
   let last = performance.now();
   let fpsAccum = 0;
   let fpsFrames = 0;
+  let lastSnap = 0; // wall-clock of last auto checkpoint
+  const SNAP_INTERVAL_MS = 5000;
 
   function frame(now) {
     const elapsed = now - last;
@@ -288,6 +303,11 @@ async function main() {
         time.simTime += sim.dt;
       } else {
         substeps = time.substepsFor(sim.activeCount, sim.dt);
+      }
+      // Auto checkpoint while time is actually advancing.
+      if (substeps > 0 && now - lastSnap >= SNAP_INTERVAL_MS) {
+        sim.snapshot(time.simTime);
+        lastSnap = now;
       }
       for (let s = 0; s < substeps; s++) sim.step(encoder);
     }

@@ -5,6 +5,9 @@ import { buildScene, DEFAULT_SCENE } from "./scenes.js";
 export const MAX_BODIES = 4096;
 export const WORKGROUP_SIZE = 64;
 
+// Checkpoint ring depth for lightweight rewind (undo points, not a scrub bar).
+export const SNAP_SLOTS = 8;
+
 // SimParams layout: dt(f32), softening2(f32), g(f32), count(u32) = 16 bytes.
 const SIM_PARAMS_BYTES = 16;
 
@@ -24,6 +27,8 @@ export class Simulation {
 
     const vec2Bytes = MAX_BODIES * 2 * 4;
     const f32Bytes = MAX_BODIES * 4;
+    this._vec2Bytes = vec2Bytes;
+    this._f32Bytes = f32Bytes;
 
     const usageRW =
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
@@ -51,7 +56,67 @@ export class Simulation {
       ],
     });
 
+    // ---- Checkpoint pool (lightweight rewind) ----
+    // A fixed pool of buffer-sets plus a stack of in-use slots. snapshot()
+    // pushes the current state (reusing the oldest slot when full); restoreLast()
+    // pops the newest. State is copied entirely on the GPU (no CPU readback).
+    this._snapPool = [];
+    for (let i = 0; i < SNAP_SLOTS; i++) {
+      this._snapPool.push({
+        positions: device.createBuffer({ label: `snap${i}-pos`, size: vec2Bytes, usage: usageRW }),
+        velocities: device.createBuffer({ label: `snap${i}-vel`, size: vec2Bytes, usage: usageRW }),
+        masses: device.createBuffer({ label: `snap${i}-mass`, size: f32Bytes, usage: usageRW }),
+      });
+    }
+    this._freeSlots = this._snapPool.map((_, i) => i);
+    this._snapStack = []; // [{ slot, count, simTime }], newest last
+
     this.seed();
+  }
+
+  // Capture current GPU state as a checkpoint. `simTime` is stored alongside so
+  // the epoch clock can be rewound too. Reuses the oldest slot when the ring is full.
+  snapshot(simTime = 0) {
+    let slot;
+    if (this._freeSlots.length > 0) {
+      slot = this._freeSlots.pop();
+    } else {
+      slot = this._snapStack.shift().slot; // drop oldest, reuse its buffers
+    }
+    const dst = this._snapPool[slot];
+    const enc = this.device.createCommandEncoder({ label: "snapshot" });
+    enc.copyBufferToBuffer(this.positions, 0, dst.positions, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(this.velocities, 0, dst.velocities, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(this.masses, 0, dst.masses, 0, this._f32Bytes);
+    this.device.queue.submit([enc.finish()]);
+    this._snapStack.push({ slot, count: this.activeCount, simTime });
+  }
+
+  // Restore the most recent checkpoint. Returns its stored simTime, or null if none.
+  restoreLast() {
+    if (this._snapStack.length === 0) return null;
+    const top = this._snapStack.pop();
+    const src = this._snapPool[top.slot];
+    const enc = this.device.createCommandEncoder({ label: "restore" });
+    enc.copyBufferToBuffer(src.positions, 0, this.positions, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(src.velocities, 0, this.velocities, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(src.masses, 0, this.masses, 0, this._f32Bytes);
+    this.device.queue.submit([enc.finish()]);
+    // accelerations are recomputed next step; zero them so a paused restore looks right
+    this.device.queue.writeBuffer(this.accels, 0, new Float32Array(MAX_BODIES * 2));
+    this.activeCount = top.count;
+    this.writeParams();
+    this._freeSlots.push(top.slot);
+    return top.simTime;
+  }
+
+  hasSnapshot() {
+    return this._snapStack.length > 0;
+  }
+
+  clearSnapshots() {
+    this._freeSlots = this._snapPool.map((_, i) => i);
+    this._snapStack = [];
   }
 
   // Load a scene's initial conditions into the GPU buffers. Clamps to MAX_BODIES.
@@ -79,6 +144,7 @@ export class Simulation {
 
   reset() {
     this.zeroFill();
+    this.clearSnapshots();
     return this.seed();
   }
 
