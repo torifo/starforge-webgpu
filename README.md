@@ -76,6 +76,6 @@ python3 -m http.server 8095   # → http://localhost:8095/
 for f in src/shaders/*.wgsl; do naga "$f"; done   # WGSL 検証
 for f in src/*.js; do node --check "$f"; done       # JS 構文
 node test/scenes.test.mjs                            # シーン初期条件（78 件）
-node test/bindings.test.mjs                          # バインディング整合（31 件）
+node test/bindings.test.mjs                          # バインディング整合（46 件）
 ```
 > 実際の描画（軌道・bloom・トレイル）は WebGPU ブラウザでの目視確認が前提。

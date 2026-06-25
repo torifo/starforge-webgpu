@@ -230,6 +230,8 @@ async function main() {
   let fpsFrames = 0;
   let lastSnap = 0; // wall-clock of last auto checkpoint
   const SNAP_INTERVAL_MS = 5000;
+  let frameNo = 0;
+  const COMPACT_EVERY = 45; // frames between slot-reclamation passes (merge scenes)
 
   function frame(now) {
     const elapsed = now - last;
@@ -274,6 +276,9 @@ async function main() {
     if (active) {
       if (elRate) elRate.textContent = time.rateLabel();
       if (elEpoch) elEpoch.textContent = time.epochLabel();
+      // periodically reclaim merged-away slots (no-op for non-merge scenes)
+      frameNo++;
+      if (frameNo % COMPACT_EVERY === 0) sim.compact();
     }
 
     renderer.drawOverlay(active ? interaction.aim() : null);

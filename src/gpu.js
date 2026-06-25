@@ -121,6 +121,27 @@ export async function initGPU(canvas) {
   const mergeApplyPipeline = makeCollide("mergeApply", "collide-mergeApply");
   const markDeadPipeline = makeCollide("markDead", "collide-markDead");
 
+  // ---- Stream compaction pipeline (compact.wgsl) ----
+  const compactShader = await loadShaderModule(device, "compact.wgsl");
+  const compactBGL = device.createBindGroupLayout({
+    label: "compact-bgl",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+    ],
+  });
+  const compactPipeline = device.createComputePipeline({
+    label: "compact",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [compactBGL] }),
+    compute: { module: compactShader, entryPoint: "compact" },
+  });
+
   // ---- Bodies render pipeline (render.wgsl) -> HDR offscreen ----
   const renderShader = await loadShaderModule(device, "render.wgsl");
 
@@ -244,6 +265,8 @@ export async function initGPU(canvas) {
     mergeApplyPipeline,
     markDeadPipeline,
     collideBGL,
+    compactPipeline,
+    compactBGL,
     // bodies
     renderPipeline,
     renderBGL,

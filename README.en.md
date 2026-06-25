@@ -78,6 +78,6 @@ python3 -m http.server 8095   # → http://localhost:8095/
 for f in src/shaders/*.wgsl; do naga "$f"; done   # validate WGSL
 for f in src/*.js; do node --check "$f"; done       # JS syntax
 node test/scenes.test.mjs                            # scene init conditions (78)
-node test/bindings.test.mjs                          # binding contract (31)
+node test/bindings.test.mjs                          # binding contract (46)
 ```
 > The actual rendered visuals (orbits, bloom, trails) are confirmed visually in a WebGPU browser.

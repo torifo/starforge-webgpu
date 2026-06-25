@@ -20,6 +20,7 @@ export class Simulation {
     this.findPrefPipeline = gpu.findPrefPipeline;
     this.mergeApplyPipeline = gpu.mergeApplyPipeline;
     this.markDeadPipeline = gpu.markDeadPipeline;
+    this.compactPipeline = gpu.compactPipeline;
 
     this.activeCount = 0;
     this.sceneId = sceneId;
@@ -98,6 +99,40 @@ export class Simulation {
         { binding: 4, resource: { buffer: this.pref } },
       ],
     });
+
+    // Compaction: scratch destination buffers + an atomic counter, read back to
+    // shrink activeCount. Survivors are packed to the front of scratch, then
+    // copied back over the live buffers in the same submit (no stale snapshot).
+    this.scratchPos = device.createBuffer({ label: "scratchPos", size: vec2Bytes, usage: usageRW });
+    this.scratchVel = device.createBuffer({ label: "scratchVel", size: vec2Bytes, usage: usageRW });
+    this.scratchMass = device.createBuffer({ label: "scratchMass", size: f32Bytes, usage: usageRW });
+    this.counter = device.createBuffer({
+      label: "compactCounter",
+      size: 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    this.counterStaging = device.createBuffer({
+      label: "compactCounterStaging",
+      size: 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    this.compactBG = device.createBindGroup({
+      label: "compact-bg",
+      layout: gpu.compactBGL,
+      entries: [
+        { binding: 0, resource: { buffer: this.collideParams } },
+        { binding: 1, resource: { buffer: this.positions } },
+        { binding: 2, resource: { buffer: this.velocities } },
+        { binding: 3, resource: { buffer: this.masses } },
+        { binding: 4, resource: { buffer: this.scratchPos } },
+        { binding: 5, resource: { buffer: this.scratchVel } },
+        { binding: 6, resource: { buffer: this.scratchMass } },
+        { binding: 7, resource: { buffer: this.counter } },
+      ],
+    });
+    this._zerosMass = new Float32Array(MAX_BODIES);
+    this._compacting = false; // true while a counter readback is in flight
+    this._compactGen = 0; // bumped on reset to discard a stale in-flight readback
 
     // ---- Checkpoint pool (lightweight rewind) ----
     // A fixed pool of buffer-sets plus a stack of in-use slots. snapshot()
@@ -190,6 +225,8 @@ export class Simulation {
   reset() {
     this.zeroFill();
     this.clearSnapshots();
+    this._compactGen += 1; // any in-flight compaction readback is now stale
+    this._compacting = false;
     return this.seed();
   }
 
@@ -231,6 +268,11 @@ export class Simulation {
 
   // Add a single body. Returns true if added, false if at capacity.
   appendBody(x, y, vx, vy, mass = 30) {
+    // While a compaction readback is in flight, activeCount is about to shrink;
+    // defer spawns one frame so they don't land in a slot that gets reclaimed.
+    if (this._compacting) {
+      return false;
+    }
     if (this.activeCount >= MAX_BODIES) {
       return false;
     }
@@ -273,6 +315,49 @@ export class Simulation {
       cp.dispatchWorkgroups(groups);
       cp.end();
     }
+  }
+
+  // Reclaim merged-away slots: pack live bodies to the front and shrink
+  // activeCount. Runs as its own submit; the counter is read back asynchronously
+  // (activeCount only tightens the loop, so a one-frame-late update is fine).
+  // Safe because scratch is filled from the current post-physics state and copied
+  // back into the same buffers (no revert), and spawns are paused during readback.
+  compact() {
+    if (this._compacting || this.collisionMode === 0 || this.activeCount <= 0) return;
+    this._compacting = true;
+    const gen = this._compactGen;
+
+    // tail of scratchMass must read 0 so reclaimed slots stay dead after copy-back
+    this.device.queue.writeBuffer(this.scratchMass, 0, this._zerosMass);
+    this.device.queue.writeBuffer(this.counter, 0, new Uint32Array([0]));
+
+    const groups = Math.ceil(this.activeCount / WORKGROUP_SIZE);
+    const enc = this.device.createCommandEncoder({ label: "compact" });
+    const p = enc.beginComputePass({ label: "compact-pass" });
+    p.setBindGroup(0, this.compactBG);
+    p.setPipeline(this.compactPipeline);
+    p.dispatchWorkgroups(groups);
+    p.end();
+    enc.copyBufferToBuffer(this.scratchPos, 0, this.positions, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(this.scratchVel, 0, this.velocities, 0, this._vec2Bytes);
+    enc.copyBufferToBuffer(this.scratchMass, 0, this.masses, 0, this._f32Bytes);
+    enc.copyBufferToBuffer(this.counter, 0, this.counterStaging, 0, 4);
+    this.device.queue.submit([enc.finish()]);
+
+    this.counterStaging
+      .mapAsync(GPUMapMode.READ)
+      .then(() => {
+        const k = new Uint32Array(this.counterStaging.getMappedRange())[0];
+        this.counterStaging.unmap();
+        if (gen === this._compactGen) {
+          this.activeCount = k;
+          this.writeParams();
+        }
+        this._compacting = false;
+      })
+      .catch(() => {
+        this._compacting = false;
+      });
   }
 
   // Encode one pointer-interaction pass. `cmd` = { x, y, vx, vy, radius, strength, mode }.
