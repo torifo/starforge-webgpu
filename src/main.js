@@ -8,6 +8,7 @@ import { Camera } from "./camera.js";
 import { Gallery } from "./gallery.js";
 import { buildScene } from "./scenes.js";
 import { TimeControl } from "./timecontrol.js";
+import { Interaction } from "./interaction.js";
 
 const canvas = document.getElementById("gpu-canvas");
 const overlay = document.getElementById("overlay-canvas");
@@ -22,6 +23,10 @@ const btnStep = document.getElementById("btn-step");
 const btnRewind = document.getElementById("btn-rewind");
 const elRate = document.getElementById("stat-rate");
 const elEpoch = document.getElementById("stat-epoch");
+const elGuide = document.getElementById("guide");
+const btnGuideToggle = document.getElementById("guide-toggle");
+const elGuideName = document.getElementById("guide-tool-name");
+const elGuideDesc = document.getElementById("guide-tool-desc");
 
 function showFallback(message) {
   if (fallback) {
@@ -67,12 +72,7 @@ async function main() {
   });
 
   const camera = new Camera();
-  const sim = new Simulation(
-    gpu.device,
-    gpu.computeForcesPipeline,
-    gpu.integratePipeline,
-    gpu.computeBGL
-  );
+  const sim = new Simulation(gpu.device, gpu);
   const overlayCtx = overlay ? overlay.getContext("2d") : null;
   const renderer = new Renderer(gpu, sim, overlayCtx);
 
@@ -201,75 +201,28 @@ async function main() {
     }
   });
 
-  // ---- Interaction (only meaningful during immersion) ----
-  const dpr = () => canvas.width / window.innerWidth;
-  let drag = null;
-  let panning = null;
-
-  function devPx(ev) {
-    const k = dpr();
-    return { x: ev.clientX * k, y: ev.clientY * k };
-  }
-
-  overlay.addEventListener("contextmenu", (e) => e.preventDefault());
-
-  overlay.addEventListener("pointerdown", (e) => {
-    if (!active) return;
-    overlay.setPointerCapture(e.pointerId);
-    const p = devPx(e);
-    if (e.button === 2 || e.shiftKey) {
-      panning = { px: p.x, py: p.y };
-    } else if (e.button === 0) {
-      drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
-    }
-  });
-
-  overlay.addEventListener("pointermove", (e) => {
-    if (!active) return;
-    const p = devPx(e);
-    if (panning) {
-      camera.panByPixels(p.x - panning.px, p.y - panning.py);
-      panning = { px: p.x, py: p.y };
-    } else if (drag) {
-      drag.x1 = p.x;
-      drag.y1 = p.y;
-    }
-  });
-
-  function endDrag(e) {
-    const p = devPx(e);
-    if (panning) {
-      panning = null;
-      return;
-    }
-    if (drag) {
-      const world0 = camera.screenToWorld(drag.x0, drag.y0);
-      const world1 = camera.screenToWorld(p.x, p.y);
-      const k = 1.5;
-      const vx = (world1.x - world0.x) * k;
-      const vy = (world1.y - world0.y) * k;
-      const added = sim.appendBody(world0.x, world0.y, vx, vy, 30);
-      if (!added) console.warn("[starforge] body buffer full; ignoring new body");
-      drag = null;
-    }
-  }
-  overlay.addEventListener("pointerup", endDrag);
-  overlay.addEventListener("pointercancel", () => {
-    drag = null;
-    panning = null;
-  });
-
-  overlay.addEventListener(
-    "wheel",
-    (e) => {
-      if (!active) return;
-      e.preventDefault();
-      const p = devPx(e);
-      const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-      camera.zoomAt(p.x, p.y, factor);
+  // ---- Interaction (tools, pointer, pan/zoom — only meaningful during immersion) ----
+  const interaction = new Interaction({
+    overlay,
+    canvas,
+    camera,
+    sim,
+    getActive: () => active,
+    // checkpoint before each gesture so any interaction can be rewound
+    beforeInteract: () => sim.snapshot(time.simTime),
+    // keep the guide panel in sync with the selected tool
+    onTool: (t) => {
+      if (elGuideName) elGuideName.textContent = t.name;
+      if (elGuideDesc) elGuideDesc.textContent = t.desc;
     },
-    { passive: false }
-  );
+  });
+  interaction.mountToolbar(document.body);
+
+  // Collapsible guide panel.
+  btnGuideToggle?.addEventListener("click", () => {
+    const open = elGuide.classList.toggle("open");
+    btnGuideToggle.setAttribute("aria-expanded", String(open));
+  });
 
   // ---- Render loop ----
   let last = performance.now();
@@ -296,6 +249,10 @@ async function main() {
     // "Speed" = substeps per frame at a fixed dt (see TimeControl).
     const encoder = gpu.device.createCommandEncoder();
     if (active) {
+      // Apply at most one pointer interaction this frame (works while paused too).
+      const cmd = interaction.tick();
+      if (cmd) sim.applyInteraction(encoder, cmd);
+
       let substeps;
       if (stepOnce) {
         substeps = 1;
@@ -319,7 +276,7 @@ async function main() {
       if (elEpoch) elEpoch.textContent = time.epochLabel();
     }
 
-    renderer.drawOverlay(active ? drag : null);
+    renderer.drawOverlay(active ? interaction.aim() : null);
 
     requestAnimationFrame(frame);
   }

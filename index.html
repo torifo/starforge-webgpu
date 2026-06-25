@@ -35,11 +35,29 @@
     #hud button:hover { background: rgba(140,200,255,0.22); }
     #hud .stat { opacity: 0.85; }
     #hud .stat b { color: #8cc8ff; font-weight: 600; }
-    #hint {
-      position: fixed; z-index: 2; bottom: 12px; left: 12px;
-      font-size: 12px; opacity: 0.55; line-height: 1.6;
-      pointer-events: none;
+    #guide {
+      position: fixed; z-index: 3; left: 50%; bottom: 70px; transform: translateX(-50%);
+      width: min(560px, 92vw);
+      border: 1px solid rgba(140,200,255,0.25); border-radius: 10px;
+      background: rgba(10,12,24,0.62); backdrop-filter: blur(6px);
+      font-size: 13px; color: #cdd8f3; user-select: none; overflow: hidden;
     }
+    #guide-toggle {
+      width: 100%; font: inherit; color: #cfe0ff; cursor: pointer;
+      background: transparent; border: none; padding: 8px 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    #guide-toggle b { color: #fff; font-weight: 600; }
+    #guide-toggle .chev { opacity: .7; transition: transform .2s ease; }
+    #guide:not(.open) .chev { transform: rotate(-90deg); }
+    #guide-body { padding: 0 13px 12px; display: grid; gap: 8px; }
+    #guide:not(.open) #guide-body { display: none; }
+    #guide-tool-desc { margin: 0; line-height: 1.7; opacity: .9; }
+    #guide-controls {
+      line-height: 1.8; opacity: .8; font-size: 12px;
+      border-top: 1px solid rgba(140,200,255,0.14); padding-top: 8px;
+    }
+    #guide-controls b { color: #8cc8ff; font-weight: 600; }
     #controls {
       position: fixed; z-index: 2; top: 12px; right: 12px; width: 192px;
       display: flex; flex-direction: column; gap: 9px;
@@ -52,6 +70,22 @@
     #controls .ctl-row { display: flex; justify-content: space-between; opacity: .88; }
     #controls .ctl-row b { color: #8cc8ff; font-weight: 600; font-variant-numeric: tabular-nums; }
     #controls input[type=range] { width: 100%; accent-color: #8cc8ff; margin: 0; }
+    #toolbar {
+      position: fixed; z-index: 2; bottom: 14px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 6px; padding: 6px;
+      border: 1px solid rgba(140,200,255,0.25); border-radius: 10px;
+      background: rgba(10,12,24,0.6); backdrop-filter: blur(6px); user-select: none;
+    }
+    #toolbar button {
+      font: inherit; font-size: 13px; color: #cfe0ff; cursor: pointer;
+      background: rgba(140,200,255,0.10); border: 1px solid rgba(140,200,255,0.28);
+      border-radius: 7px; padding: 6px 12px;
+    }
+    #toolbar button:hover { background: rgba(140,200,255,0.20); }
+    #toolbar button.active {
+      background: rgba(140,200,255,0.30); border-color: rgba(180,220,255,0.7);
+      color: #ffffff; box-shadow: 0 0 0 1px rgba(180,220,255,0.4) inset;
+    }
     #fallback {
       position: fixed; inset: 0; z-index: 10; display: none;
       flex-direction: column; align-items: center; justify-content: center;
@@ -61,7 +95,8 @@
 
     /* HUD + hint are hidden while in the gallery, shown during immersion. */
     body.gallery-open #hud,
-    body.gallery-open #hint,
+    body.gallery-open #guide,
+    body.gallery-open #toolbar,
     body.gallery-open #controls { display: none; }
 
     /* ---- Gallery (展示室) — cinematic deep-space scene selector ---- */
@@ -283,10 +318,20 @@
     <span class="stat">fps <b id="stat-fps">–</b></span>
   </div>
 
-  <div id="hint">
-    drag = add a star (drag direction & length sets velocity) ·
-    wheel = zoom · right-drag / shift-drag = pan ·
-    space = pause · <b>, / .</b> = slower / faster · <b>h</b> = hyperlapse · <b>n</b> = step · <b>z</b> = rewind · R = reset
+  <div id="guide" class="open">
+    <button id="guide-toggle" aria-expanded="true">
+      <span>ガイド — <b id="guide-tool-name">つかむ・投げる</b></span>
+      <span class="chev">⌄</span>
+    </button>
+    <div id="guide-body">
+      <p id="guide-tool-desc"></p>
+      <div id="guide-controls">
+        <b>時間</b> スペースで停止／再開・<b>,</b> <b>.</b> で遅く／速く・<b>h</b> ハイパーラプス・<b>n</b> でコマ送り<br>
+        <b>やり直し</b> <b>z</b> で少し前に戻す（数秒ごとと操作の直前に自動で記録）<br>
+        <b>視点</b> ホイールでズーム・右ドラッグか Shift＋ドラッグで移動・<b>R</b> で最初から<br>
+        <b>道具</b> 数字キー <b>1–4</b> か下のボタンで切り替え
+      </div>
+    </div>
   </div>
 
   <div id="fallback">Loading…</div>

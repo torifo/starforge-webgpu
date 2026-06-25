@@ -12,10 +12,11 @@ export const SNAP_SLOTS = 8;
 const SIM_PARAMS_BYTES = 16;
 
 export class Simulation {
-  constructor(device, computeForcesPipeline, integratePipeline, computeBGL, sceneId = DEFAULT_SCENE) {
+  constructor(device, gpu, sceneId = DEFAULT_SCENE) {
     this.device = device;
-    this.computeForcesPipeline = computeForcesPipeline;
-    this.integratePipeline = integratePipeline;
+    this.computeForcesPipeline = gpu.computeForcesPipeline;
+    this.integratePipeline = gpu.integratePipeline;
+    this.interactPipeline = gpu.interactPipeline;
 
     this.activeCount = 0;
     this.sceneId = sceneId;
@@ -46,13 +47,30 @@ export class Simulation {
 
     this.bindGroup = device.createBindGroup({
       label: "compute-bg",
-      layout: computeBGL,
+      layout: gpu.computeBGL,
       entries: [
         { binding: 0, resource: { buffer: this.params } },
         { binding: 1, resource: { buffer: this.positions } },
         { binding: 2, resource: { buffer: this.velocities } },
         { binding: 3, resource: { buffer: this.accels } },
         { binding: 4, resource: { buffer: this.masses } },
+      ],
+    });
+
+    // Interaction (pointer impulse) uniform + bind group. Layout matches IParams
+    // in interact.wgsl: pos,vel (vec2 each), radius, strength (f32), mode, count (u32).
+    this.interactParams = device.createBuffer({
+      label: "interactParams",
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.interactBG = device.createBindGroup({
+      label: "interact-bg",
+      layout: gpu.interactBGL,
+      entries: [
+        { binding: 0, resource: { buffer: this.interactParams } },
+        { binding: 1, resource: { buffer: this.positions } },
+        { binding: 2, resource: { buffer: this.velocities } },
       ],
     });
 
@@ -204,6 +222,28 @@ export class Simulation {
     pass.setPipeline(this.integratePipeline);
     pass.dispatchWorkgroups(groups);
 
+    pass.end();
+  }
+
+  // Encode one pointer-interaction pass. `cmd` = { x, y, vx, vy, radius, strength, mode }.
+  // At most one interaction should be applied per frame (the uniform is shared).
+  applyInteraction(encoder, cmd) {
+    if (this.activeCount <= 0) return;
+    const buf = new ArrayBuffer(32);
+    const f = new Float32Array(buf);
+    const u = new Uint32Array(buf);
+    f[0] = cmd.x; f[1] = cmd.y;
+    f[2] = cmd.vx ?? 0; f[3] = cmd.vy ?? 0;
+    f[4] = cmd.radius; f[5] = cmd.strength;
+    u[6] = cmd.mode >>> 0;
+    u[7] = this.activeCount;
+    this.device.queue.writeBuffer(this.interactParams, 0, buf);
+
+    const groups = Math.ceil(this.activeCount / WORKGROUP_SIZE);
+    const pass = encoder.beginComputePass({ label: "interact" });
+    pass.setPipeline(this.interactPipeline);
+    pass.setBindGroup(0, this.interactBG);
+    pass.dispatchWorkgroups(groups);
     pass.end();
   }
 }

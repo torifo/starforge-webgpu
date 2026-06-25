@@ -82,6 +82,22 @@ export async function initGPU(canvas) {
     compute: { module: nbody, entryPoint: "integrate" },
   });
 
+  // ---- Interaction compute pipeline (interact.wgsl) ----
+  const interactShader = await loadShaderModule(device, "interact.wgsl");
+  const interactBGL = device.createBindGroupLayout({
+    label: "interact-bgl",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+    ],
+  });
+  const interactPipeline = device.createComputePipeline({
+    label: "interact",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [interactBGL] }),
+    compute: { module: interactShader, entryPoint: "interact" },
+  });
+
   // ---- Bodies render pipeline (render.wgsl) -> HDR offscreen ----
   const renderShader = await loadShaderModule(device, "render.wgsl");
 
@@ -197,6 +213,9 @@ export async function initGPU(canvas) {
     computeForcesPipeline,
     integratePipeline,
     computeBGL,
+    // interaction
+    interactPipeline,
+    interactBGL,
     // bodies
     renderPipeline,
     renderBGL,
