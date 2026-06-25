@@ -97,6 +97,7 @@ const gpuSrc = read("src/gpu.js");
 // which is exactly what the shared BGL must cover.
 const cases = [
   { wgsl: "src/shaders/nbody.wgsl", bgl: "compute-bgl" },
+  { wgsl: "src/shaders/interact.wgsl", bgl: "interact-bgl" },
   { wgsl: "src/shaders/render.wgsl", bgl: "render-bgl" },
   { wgsl: "src/shaders/nebula.wgsl", bgl: "nebula-bgl" },
   { wgsl: "src/shaders/bloom.wgsl", bgl: "bloom-bgl" },
