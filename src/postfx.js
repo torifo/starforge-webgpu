@@ -46,10 +46,10 @@ export class PostFX {
     });
 
     // tunables
-    this.threshold = 0.55;
+    this.threshold = 0.62;
     this.trailDecay = 0.9;
-    this.bloomStrength = 1.4;
-    this.exposure = 1.0;
+    this.bloomStrength = 0.8;
+    this.exposure = 0.72;
 
     this.width = 0;
     this.height = 0;
