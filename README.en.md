@@ -16,6 +16,14 @@ then grab and throw stars, drop heavy bodies, hurl clusters into collisions, and
 (hyperlapse) to watch the cosmos evolve. It's the "real computation" counterpart to
 CSS-animation studies. No backend, no network — plain ES modules.
 
+## Screenshots
+
+![Gallery (6 scenes)](docs/screenshots/gallery.jpg)
+
+| Galaxy collision (time controls, tools, and guide visible) | Accretion disk |
+|---|---|
+| ![Galaxy collision](docs/screenshots/galaxy-collision.jpg) | ![Accretion disk](docs/screenshots/accretion-disk.jpg) |
+
 ## Flow
 **Gallery (6 scenes) → click for full-screen immersion → Esc to return.** The current scene is kept in the URL hash (`#scene=galaxy`).
 
