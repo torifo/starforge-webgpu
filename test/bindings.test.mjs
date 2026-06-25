@@ -98,6 +98,7 @@ const gpuSrc = read("src/gpu.js");
 const cases = [
   { wgsl: "src/shaders/nbody.wgsl", bgl: "compute-bgl" },
   { wgsl: "src/shaders/interact.wgsl", bgl: "interact-bgl" },
+  { wgsl: "src/shaders/collide.wgsl", bgl: "collide-bgl" },
   { wgsl: "src/shaders/render.wgsl", bgl: "render-bgl" },
   { wgsl: "src/shaders/nebula.wgsl", bgl: "nebula-bgl" },
   { wgsl: "src/shaders/bloom.wgsl", bgl: "bloom-bgl" },

@@ -144,7 +144,7 @@ function buildAccretion() {
   }
   return {
     ...out,
-    params: { g: SIM_G, softening: SIM_SOFTENING, dt: SIM_DT },
+    params: { g: SIM_G, softening: SIM_SOFTENING, dt: SIM_DT, collisionMode: 1, mergeScale: 2.2 },
     camera: { center: { x: 0, y: 0 }, halfWorldHeight: 700 },
   };
 }
@@ -167,7 +167,7 @@ function buildCollapse() {
   }
   return {
     ...out,
-    params: { g: SIM_G, softening: 12.0, dt: SIM_DT },
+    params: { g: SIM_G, softening: 12.0, dt: SIM_DT, collisionMode: 1, mergeScale: 2.5 },
     camera: { center: { x: 0, y: 0 }, halfWorldHeight: 760 },
   };
 }
@@ -233,7 +233,7 @@ function buildCluster() {
   }
   return {
     ...out,
-    params: { g: SIM_G, softening: 14.0, dt: SIM_DT },
+    params: { g: SIM_G, softening: 14.0, dt: SIM_DT, collisionMode: 1, mergeScale: 2.2 },
     camera: { center: { x: 0, y: 0 }, halfWorldHeight: 700 },
   };
 }

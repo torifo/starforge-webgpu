@@ -58,12 +58,22 @@ fn starColor(t: f32) -> vec3<f32> {
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VSOut {
+  let m = masses[ii];
+  // dead body (merged away): emit a degenerate, off-screen vertex so it's culled
+  if (m <= 0.0) {
+    var dead: VSOut;
+    dead.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    dead.uv = vec2<f32>(2.0, 2.0);
+    dead.bright = 0.0;
+    dead.color = vec3<f32>(0.0, 0.0, 0.0);
+    return dead;
+  }
+
   let world = positions[ii];
   let center = world * camera.scale + camera.translate;
 
   let corner = cornerFor(vi);
   // larger mass -> slightly larger sprite (gentle, log-ish via sqrt)
-  let m = masses[ii];
   let sizeScale = clamp(sqrt(max(m, 0.0001)), 0.5, 4.0);
   let offset = corner * camera.pointSize * sizeScale;
 

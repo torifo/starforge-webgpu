@@ -98,6 +98,29 @@ export async function initGPU(canvas) {
     compute: { module: interactShader, entryPoint: "interact" },
   });
 
+  // ---- Collision / merge compute pipelines (collide.wgsl) ----
+  const collideShader = await loadShaderModule(device, "collide.wgsl");
+  const collideBGL = device.createBindGroupLayout({
+    label: "collide-bgl",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+    ],
+  });
+  const collideLayout = device.createPipelineLayout({ bindGroupLayouts: [collideBGL] });
+  const makeCollide = (entry, label) =>
+    device.createComputePipeline({
+      label,
+      layout: collideLayout,
+      compute: { module: collideShader, entryPoint: entry },
+    });
+  const findPrefPipeline = makeCollide("findPref", "collide-findPref");
+  const mergeApplyPipeline = makeCollide("mergeApply", "collide-mergeApply");
+  const markDeadPipeline = makeCollide("markDead", "collide-markDead");
+
   // ---- Bodies render pipeline (render.wgsl) -> HDR offscreen ----
   const renderShader = await loadShaderModule(device, "render.wgsl");
 
@@ -216,6 +239,11 @@ export async function initGPU(canvas) {
     // interaction
     interactPipeline,
     interactBGL,
+    // collision / merge
+    findPrefPipeline,
+    mergeApplyPipeline,
+    markDeadPipeline,
+    collideBGL,
     // bodies
     renderPipeline,
     renderBGL,

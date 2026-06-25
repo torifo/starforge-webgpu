@@ -22,6 +22,11 @@ fn computeForces(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (i >= params.count) {
     return;
   }
+  // dead bodies (merged away, mass 0) exert and feel nothing
+  if (masses[i] == 0.0) {
+    accels[i] = vec2<f32>(0.0, 0.0);
+    return;
+  }
 
   let pi = positions[i];
   var acc = vec2<f32>(0.0, 0.0);
@@ -50,6 +55,9 @@ fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= params.count) {
     return;
+  }
+  if (masses[i] == 0.0) {
+    return;   // dead body: leave it frozen until compaction reclaims the slot
   }
 
   let a = accels[i];

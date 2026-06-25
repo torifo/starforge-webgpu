@@ -17,6 +17,9 @@ export class Simulation {
     this.computeForcesPipeline = gpu.computeForcesPipeline;
     this.integratePipeline = gpu.integratePipeline;
     this.interactPipeline = gpu.interactPipeline;
+    this.findPrefPipeline = gpu.findPrefPipeline;
+    this.mergeApplyPipeline = gpu.mergeApplyPipeline;
+    this.markDeadPipeline = gpu.markDeadPipeline;
 
     this.activeCount = 0;
     this.sceneId = sceneId;
@@ -25,6 +28,8 @@ export class Simulation {
     this.dt = 0.016;
     this.softening = 8.0;   // epsilon (world units)
     this.g = 50.0;          // gravitational scale
+    this.collisionMode = 0; // 0 = off, 1 = merge (accretion). Set per-scene.
+    this.mergeScale = 2.0;  // collision radius = mergeScale * mass^(1/3)
 
     const vec2Bytes = MAX_BODIES * 2 * 4;
     const f32Bytes = MAX_BODIES * 4;
@@ -71,6 +76,26 @@ export class Simulation {
         { binding: 0, resource: { buffer: this.interactParams } },
         { binding: 1, resource: { buffer: this.positions } },
         { binding: 2, resource: { buffer: this.velocities } },
+      ],
+    });
+
+    // Collision / merge: a per-body "preferred partner" index buffer + params,
+    // matching CollideParams in collide.wgsl (count,u32; mode,u32; mergeScale,f32; pad).
+    this.pref = device.createBuffer({ label: "pref", size: f32Bytes, usage: usageRW });
+    this.collideParams = device.createBuffer({
+      label: "collideParams",
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this.collideBG = device.createBindGroup({
+      label: "collide-bg",
+      layout: gpu.collideBGL,
+      entries: [
+        { binding: 0, resource: { buffer: this.collideParams } },
+        { binding: 1, resource: { buffer: this.positions } },
+        { binding: 2, resource: { buffer: this.velocities } },
+        { binding: 3, resource: { buffer: this.masses } },
+        { binding: 4, resource: { buffer: this.pref } },
       ],
     });
 
@@ -147,6 +172,8 @@ export class Simulation {
       this.dt = scene.params.dt ?? this.dt;
       this.softening = scene.params.softening ?? this.softening;
       this.g = scene.params.g ?? this.g;
+      this.collisionMode = scene.params.collisionMode ?? 0;
+      this.mergeScale = scene.params.mergeScale ?? this.mergeScale;
     }
 
     const acc = new Float32Array(n * 2); // zeros
@@ -191,6 +218,15 @@ export class Simulation {
     f[2] = this.g;
     u[3] = this.activeCount;
     this.device.queue.writeBuffer(this.params, 0, buf);
+
+    // CollideParams: count(u32), mode(u32), mergeScale(f32), pad(f32)
+    const cbuf = new ArrayBuffer(16);
+    const cf = new Float32Array(cbuf);
+    const cu = new Uint32Array(cbuf);
+    cu[0] = this.activeCount;
+    cu[1] = this.collisionMode;
+    cf[2] = this.mergeScale;
+    this.device.queue.writeBuffer(this.collideParams, 0, cbuf);
   }
 
   // Add a single body. Returns true if added, false if at capacity.
@@ -223,6 +259,20 @@ export class Simulation {
     pass.dispatchWorkgroups(groups);
 
     pass.end();
+
+    // Collision / merge (per-scene). Three ordered passes share one compute pass;
+    // writes from each dispatch are visible to the next within the pass.
+    if (this.collisionMode !== 0) {
+      const cp = encoder.beginComputePass({ label: "collide" });
+      cp.setBindGroup(0, this.collideBG);
+      cp.setPipeline(this.findPrefPipeline);
+      cp.dispatchWorkgroups(groups);
+      cp.setPipeline(this.mergeApplyPipeline);
+      cp.dispatchWorkgroups(groups);
+      cp.setPipeline(this.markDeadPipeline);
+      cp.dispatchWorkgroups(groups);
+      cp.end();
+    }
   }
 
   // Encode one pointer-interaction pass. `cmd` = { x, y, vx, vy, radius, strength, mode }.
